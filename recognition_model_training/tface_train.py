@@ -8,6 +8,10 @@ from torchkit.util import accuracy_dist
 from torchkit.util import AllGather
 from torchkit.loss import get_loss
 from torchkit.task import BaseTask
+from torch.nn.parallel import DistributedDataParallel as DDP
+import sys
+sys.path.append('./dareblopy')
+
 
 class TrainTask(BaseTask):
     """ TrainTask in distfc mode, which means classifier shards into multi workers
@@ -17,15 +21,6 @@ class TrainTask(BaseTask):
         super(TrainTask, self).__init__(cfg_file)
 
     def loop_step(self, epoch):
-        """
-        load_data
-            |
-        extract feature
-            |
-        optimizer step
-            |
-        print log and write summary
-        """
         backbone, heads = self.backbone, list(self.heads.values())
         backbone.train()  # set to training mode
         for head in heads:
@@ -37,16 +32,13 @@ class TrainTask(BaseTask):
         am_top5s = [AverageMeter() for _ in batch_sizes]
         t = Timer()
 
-
         for step, samples in enumerate(self.train_loader):
-            # call hook function before_train_iter
-            self.call_hook("before_train_iter", step, epoch)
-            backbone_opt, head_opts = self.opt['backbone'], list(self.opt['heads'].values())
-
-            inputs = samples[0].cuda(non_blocking=True)
-   
-            
-            labels = samples[1].cuda(non_blocking=True)
+            # Debug input data
+            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            inputs = samples[0].to(device, non_blocking=True)
+            labels = samples[1].to(device, non_blocking=True)
+            print(f"Step {step}: Inputs shape: {inputs.shape}, Labels shape: {labels.shape}")
+            print(f"Step {step}: Labels: {labels[:5]}")  # Print the first 5 labels
 
             if self.amp:
                 with amp.autocast():
@@ -55,84 +47,95 @@ class TrainTask(BaseTask):
             else:
                 features = backbone(inputs)
 
-            # gather features
-            features_gather = AllGather(features, self.world_size)
-            features_gather = [torch.split(x, batch_sizes) for x in features_gather]
-            all_features = []
-            for i in range(len(batch_sizes)):
-                all_features.append(torch.cat([x[i] for x in features_gather], dim=0).cuda())
+            # Debug model outputs
+            print(f"Step {step}: Features shape: {features.shape}")
+            print(f"Step {step}: Features (first 5): {features[:5]}")
 
-            # gather labels
-            with torch.no_grad():
-                labels_gather = AllGather(labels, self.world_size)
-            labels_gather = [torch.split(x, batch_sizes) for x in labels_gather]
-            all_labels = []
-            for i in range(len(batch_sizes)):
-                all_labels.append(torch.cat([x[i] for x in labels_gather], dim=0).cuda())
+            # Gather features and labels
+            features_gather = AllGather(features, self.world_size)
+            labels_gather = AllGather(labels, self.world_size)
 
             losses = []
             for i in range(len(batch_sizes)):
-                # PartialFC need update optimizer state in training process
                 if self.pfc:
-                    outputs, labels, original_outputs = heads[i](all_features[i], all_labels[i], head_opts[i])
+                    outputs, labels, original_outputs = heads[i](features_gather[i], labels_gather[i], head_opts[i])
                 else:
-                    outputs, labels, original_outputs = heads[i](all_features[i], all_labels[i])
+                    outputs, labels, original_outputs = heads[i](features_gather[i], labels_gather[i])
 
+                # Debug outputs and loss
+                print(f"Step {step}, Head {i}: Outputs shape: {outputs.shape}, Labels shape: {labels.shape}")
                 loss = self.loss(outputs, labels) * self.branch_weights[i]
+                print(f"Step {step}, Head {i}: Loss: {loss.item()}")
                 losses.append(loss)
-                prec1, prec5 = accuracy_dist(self.cfg,
-                                             original_outputs.data,
-                                             all_labels[i],
-                                             self.class_shards[i],
-                                             topk=(1, 5))
-                am_losses[i].update(loss.data.item(), all_features[i].size(0))
-                am_top1s[i].update(prec1.data.item(), all_features[i].size(0))
-                am_top5s[i].update(prec5.data.item(), all_features[i].size(0))
 
-            # update summary and log_buffer
-            scalars = {
-                'train/loss': am_losses,
-                'train/top1': am_top1s,
-                'train/top5': am_top5s,
-            }
-            self.update_summary({'scalars': scalars})
-            log = {
-                'loss': am_losses,
-                'prec@1': am_top1s,
-                'prec@5': am_top5s,
-            }
-            self.update_log_buffer(log)
-
-            # compute loss
+            # Compute total loss
             total_loss = sum(losses)
-            # compute gradient and do SGD
-            backbone_opt.zero_grad()
-            for head_opt in head_opts:
+            print(f"Step {step}: Total loss: {total_loss.item()}")
+
+            # Backward pass
+            self.backbone_opt.zero_grad()
+            for head_opt in self.head_opts:
                 head_opt.zero_grad()
 
-            # Automatic Mixed Precision setting
             if self.amp:
                 self.scaler.scale(total_loss).backward()
-                self.scaler.step(backbone_opt)
-                for head_opt in head_opts:
+                self.scaler.step(self.backbone_opt)
+                for head_opt in self.head_opts:
                     self.scaler.step(head_opt)
                 self.scaler.update()
             else:
                 total_loss.backward()
-                backbone_opt.step()
-                for head_opt in head_opts:
+
+                # Debug gradients
+                for name, param in self.backbone.named_parameters():
+                    if param.grad is not None:
+                        print(f"Step {step}: {name} gradient mean: {param.grad.abs().mean()}")
+                    else:
+                        print(f"Step {step}: {name} has no gradient")
+
+                self.backbone_opt.step()
+                for head_opt in self.head_opts:
                     head_opt.step()
 
-            # PartialFC need update weight and weight_norm manually
-            if self.pfc:
-                for head in heads:
-                    head.update()
+            # Debug learning rate
+            for param_group in self.backbone_opt.param_groups:
+                print(f"Step {step}: Learning rate: {param_group['lr']}")
 
+            # Log time cost
             cost = t.get_duration()
             self.update_log_buffer({'time_cost': cost})
 
             # call hook function after_train_iter
             self.call_hook("after_train_iter", step, epoch)
+
+    def make_optimizers(self):
+        # Optimizer for backbone
+        self.opt = torch.optim.SGD(
+            self.backbone.parameters(),
+            lr=self.cfg['LRS'][0],
+            momentum=self.cfg['MOMENTUM'],
+            weight_decay=self.cfg['WEIGHT_DECAY']
+        )
+        self.backbone_opt = self.opt 
+
+        # Optimizer(s) for heads
+        all_head_params = []
+        for head in self.heads.values():
+            all_head_params += list(head.parameters())
+
+        self.head_opts = [torch.optim.SGD(  
+            all_head_params,
+            lr=self.cfg['LRS'][0],
+            momentum=self.cfg['MOMENTUM'],
+            weight_decay=self.cfg['WEIGHT_DECAY']
+        )]
+
+
+
+
+
+        
+        
 
     def prepare(self):
         """ common prepare task for training
@@ -145,8 +148,9 @@ class TrainTask(BaseTask):
         else:
             self.make_inputs()
             self.make_model()
-        self.loss = get_loss('DistCrossEntropy').cuda()
-        self.opt = self.get_optimizer()
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.loss = get_loss('DistCrossEntropy').to(device)
+        self.make_optimizers()
         self.register_hooks()
         self.pfc = self.cfg['HEAD_NAME'] == 'PartialFC'
 
@@ -170,8 +174,10 @@ class TrainTask(BaseTask):
         """
         self.prepare()
         self.call_hook("before_run")
-        self.backbone = DistributedDataParallel(self.backbone, device_ids=[self.local_rank],
-                                                find_unused_parameters=True)
+        if torch.cuda.is_available():
+            self.backbone = DDP(self.backbone.to(f"cuda:{self.local_rank}"), device_ids=[self.local_rank])
+        else:
+            self.backbone = DDP(self.backbone)  # No device_ids for CPU
         for epoch in range(self.start_epoch, self.epoch_num):
             self.call_hook("before_train_epoch", epoch)
             self.loop_step(epoch)

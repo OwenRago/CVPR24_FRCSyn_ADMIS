@@ -222,7 +222,8 @@ class DiffusionTrainerLite(LightningLite):
 
         # training loop
         metrics = {}
-        loss_metric = tm.MeanMetric().cuda()
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        loss_metric = tm.MeanMetric().to(device)
         while True:
             count = 0
             for x, context in dataloader:
@@ -352,7 +353,8 @@ class DiffusionTrainerLite(LightningLite):
 @hydra.main(config_path='configs', config_name='train_config', version_base=None)
 def train(cfg: DictConfig):
     print(OmegaConf.to_yaml(cfg))
-    trainer = DiffusionTrainerLite(devices='auto', accelerator='gpu', precision=cfg.training.precision)
+    ##trainer = DiffusionTrainerLite(devices='auto', accelerator='gpu', precision=cfg.training.precision)
+    trainer = DiffusionTrainerLite(devices=1, accelerator='cpu', precision=cfg.training.precision)
     trainer.run(cfg)
 
 

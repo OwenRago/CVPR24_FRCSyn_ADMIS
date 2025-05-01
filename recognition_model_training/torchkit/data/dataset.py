@@ -9,6 +9,9 @@ class SingleDataset(Dataset):
     """
 
     def __init__(self, data_root, index_root, name, transform, **kwargs) -> None:
+
+        self.image_mode = os.path.isdir(self.data_root)
+
         """ Create a ``SingleDataset`` object
 
             Args:
@@ -129,7 +132,8 @@ class MultiDataset(Dataset):
         """
 
         for i, name in enumerate(self.names):
-            index_file = os.path.join(self.index_root, name + ".txt")
+            # index_file = os.path.join(self.index_root, name + ".txt")
+            index_file = os.path.join(self.data_root, "..", "tfrecords", name + ".index")
             self.index_parser.reset()
             self.inputs[name] = []
             with open(index_file, 'r') as f:
@@ -205,29 +209,28 @@ class CASIADataset(Dataset):
 
     def _build_inputs(self):
         for i, name in enumerate(self.names):
-            class_num = 0
-            self.sample_nums[name] = 0
+            self.inputs[name] = []
 
-            class_num = 10752
-            def read_path_label(file_path):  
-                with open(file_path, 'r') as file:  
-                    pairs = [line.split(' ') for line in file]  
-                return pairs  
-            CASIA_txt = read_path_label(self.clean_txt)
-            for image_path, label in CASIA_txt:
-                image_path_temp = image_path.split("/")
-                # '0000045/001.jpg'
-                image_path_clean = os.path.join(image_path_temp[1], image_path_temp[2])
-                # '0\n'
-                label_temp = label.split("\n")
-                # 0
-                label_clean = int(label_temp[0]) 
-                self.inputs.append([label_clean, image_path_clean])
-                self.sample_nums[name] += 1
+            # ✅ Correct the path to the .index file
+            index_file = os.path.join(self.data_root, "..", "tfrecords", name + ".index")
+            index_file = os.path.normpath(index_file)  # clean up the path
 
-            self.class_nums[name] = class_num
+            if not os.path.isfile(index_file):
+                raise FileNotFoundError(f"[ERROR] Index file not found: {index_file}")
+
+            d = self.build_dict(index_file)
+
+            for key in d:
+                label = int(key.split("/")[-2])
+                tfr_name, file_index, file_offset = d[key].split("\t")
+                sample = self.index_parser(label, tfr_name, file_index, file_offset)
+                self.inputs[name].append(sample)
+
+            self.class_nums[name] = self.index_parser.class_num + 1
+            self.sample_nums[name] = len(self.inputs[name])
             logging.info("Dataset %s, class_num %d, sample_num %d" % (
-                    name, self.class_nums[name], self.sample_nums[name]))
+                name, self.class_nums[name], self.sample_nums[name]))
+
 
     def __len__(self):
         return len(self.sample_num)
@@ -248,24 +251,20 @@ class CASIADataset(Dataset):
 # For TFrecord-Synthetic data
 class TF_SyntheticDataset(Dataset):
     def __init__(self, data_root, name, transform, num_duplices=1, AdaFace_augment_prob = 0.2, **kwargs) -> None:
-            """ Create a ``SingleDataset`` object
-                Args:
-                data_root: image or tfrecord data root path
-                stylebank_suffix: {index}_stylebank_BUPT_10k.jpg
-                name: dataset name
-                transform: transform for data augmentation
-            """
-            super().__init__()
-            self.data_root = data_root
-            self.names = name
-            self.num_duplices = num_duplices
-            self.index_parser = Synthetic_IndexParser()
-            self.sample_parser = AdaFaceTFRecordSampleParser(transform, AdaFace_augment_prob)
-            self.inputs = dict()
-            self.is_shard = False
-            self.class_nums = dict()
-            self.sample_nums = dict()
-            self._build_inputs()
+        super().__init__()
+        self.data_root = data_root
+        self.names = name
+        self.num_duplices = num_duplices
+        self.sample_parser = ImgSampleParser(transform, crop_augmentation_prob = AdaFace_augment_prob)
+        self.inputs = dict()
+        self.is_shard = False
+        self.class_nums = dict()
+        self.sample_nums = dict()
+        self._build_inputs()
+        self.all_samples = []
+        for name in self.names:
+            self.all_samples.extend(self.inputs[name])
+
 
     @property
     def dataset_num(self):
@@ -273,59 +272,64 @@ class TF_SyntheticDataset(Dataset):
 
     @property
     def class_num(self):
-        class_nums = []
-        for name in self.names:
-            class_nums.append(self.class_nums[name])
-        return class_nums
-
-    def build_dict(self, tfr_index):
-        d = {}
-        print("reading {}".format(tfr_index))
-        tfr_name = os.path.basename(tfr_index).replace('.index', '')
-        with open(tfr_index, 'r') as f:
-            for line in f:
-                temp = line.rstrip().split('\t')
-                # Syn_10k, Syn_30k
-                if len(temp) == 3:
-                    file_name, shard_index, offset = temp
-                # CASIA
-                else:
-                    new_path = temp[0].split("/")
-                    file_name, shard_index, offset = os.path.join(new_path[1], temp[3], new_path[3]), temp[1], temp[2]
-                d[file_name] = '{}\t{}\t{}'.format(tfr_name, shard_index, offset)
-        print("build dict done")
-        return d
+        return [self.class_nums[name] for name in self.names]
 
     def make_dataset(self):
         self._build_inputs()
 
     def _build_inputs(self):
-        for i, name in enumerate(self.names):
-            self.inputs[name] = []
-            index_file = os.path.join(self.data_root, name + ".index")
-            d = self.build_dict(index_file)
-            # key: 
-            # value: 
-            for key in d:
-                label = int(key.split("/")[-2]) # 2949
-                name, file_index, file_offset = d[key].split("\t")
-                sample = self.index_parser(label, name, file_index, file_offset)
-                self.inputs[name].append(sample)
+        import glob
+        inputs = []
+        label_map = {}
+        label_counter = 0
 
-            self.class_nums[name] = self.index_parser.class_num + 1
-            self.sample_nums[name] = len(self.inputs[name])
-            logging.info("Dataset %s, class_num %d, sample_num %d" % (
-                name, self.class_nums[name], self.sample_nums[name]))
+        for name in self.names:
+            dataset_path = os.path.join(self.data_root, name)
+            print(f"[INFO] Loading images from: {dataset_path}")
+
+            if not os.path.isdir(dataset_path):
+                raise FileNotFoundError(f"Expected image folder at: {dataset_path}")
+
+            image_paths = glob.glob(os.path.join(dataset_path, '**/*.jpg'), recursive=True)
+            if not image_paths:
+                raise ValueError(f"No images found in {dataset_path}")
+
+            for img_path in image_paths:
+                # ❗ Get the immediate folder name under 'all', e.g., class0, class1, etc.
+                class_name = os.path.basename(os.path.dirname(img_path))
+
+                if class_name not in label_map:
+                    label_map[class_name] = label_counter
+                    label_counter += 1
+
+                inputs.append([img_path, label_map[class_name]])
+
+        self.inputs = {"all": inputs}
+        self.class_nums = {"all": len(label_map)}
+        self.sample_nums = {"all": len(inputs)}
+
+        print(f"[INFO] Loaded {len(inputs)} images with {len(label_map)} classes total.")
+        print(f"[DEBUG] Label map: {label_map}")  # ← optional for checking
 
     def __len__(self):
-        return len(self.sample_num)
+        return len(self.all_samples)
 
     def __getitem__(self, index):
-        """ Parse image and label data from index
-        """
-        # ('10k_id_54images', 136044)
-        name, index = index
-        sample = list(self.inputs[name][index])
-        sample[0] = os.path.join(self.data_root, sample[0])  # data_root join
+        print(f"Index type: {type(index)}, Index value: {index}")
+        
+        # Handle tuple index
+        if isinstance(index, tuple):
+            key, index = index  # Unpack the tuple
+            if key != "all":
+                raise ValueError(f"Unexpected key in index: {key}. Expected 'all'.")
+        
+        # Use the integer index to access self.all_samples
+        img_path, label = self.all_samples[index]
+        print(f"Image path: {img_path}, Label: {label}")  # Debug print
+
+        sample = [img_path, label]
         image, label = self.sample_parser(*sample)
+        print(f"Image shape: {image.shape}, Label after parsing: {label}")  # Debug print
         return image, label
+
+

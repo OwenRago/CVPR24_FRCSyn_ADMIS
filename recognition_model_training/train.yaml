@@ -1,12 +1,10 @@
 SEED: 1336 # random seed for reproduce results
-DATA_ROOT: '../dataset/CASIA/TFR_training_data' # the parent root where your train/val/test data are stored
-INDEX_ROOT: '../dataset/CASIA/TFR_training_data'
-DATASETS: # the dataset index name
-  - name: Syn_10k # [Syn_30k, Syn_10k, TFR-CASIA_NoCrop]
-    batch_size: 64
-    weight: 1.0
-    scale: 64
-    margin: 0.5
+##DATA_ROOT: '../dataset/CASIA/TFR_training_data' # the parent root where your train/val/test data are stored
+DATA_ROOT: ../dataset/Syn_10k
+##INDEX_ROOT: '../dataset/CASIA/TFR_training_data'
+INDEX_ROOT: ../dataset/Syn_10k
+DATASETS:
+  - {name: "all", batch_size: 16, weight: 1.0, scale: 64, margin: 0.5}
 
 BACKBONE_RESUME: ""
 META_RESUME: ""
@@ -44,7 +42,7 @@ MOMENTUM: 0.9
 WORLD_SIZE: 8
 RANK: 0
 LOCAL_RANK: 0
-DIST_BACKEND: 'nccl'
+DIST_BACKEND: 'gloo'
 DIST_URL: 'env://'
 NUM_WORKERS: 8
 AMP: false # fp16 for backbone

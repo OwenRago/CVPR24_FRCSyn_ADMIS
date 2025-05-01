@@ -54,7 +54,7 @@ class DenoisingDiffusionProbabilisticModel(torch.nn.Module):
     def sample(self, n_samples, size, x_T: torch.Tensor = None, context: torch.Tensor = None, dropout_mask: torch.Tensor = None) -> torch.Tensor:  
         # if initial noise is not provided then sample it
         # style test
-        x_t = x_T if x_T is not None else self.sample_prior(n_samples, size).cuda()
+        x_t = x_T if x_T is not None else self.sample_prior(n_samples, size).to("cpu")
         # this samples accordingly to Algorithm 2
         self.eval()
         # torch.manual_seed(41)
@@ -63,10 +63,10 @@ class DenoisingDiffusionProbabilisticModel(torch.nn.Module):
             # pbar.set_description("DDPM Sampling")
             # for i in pbar:
             for i in reversed(range(0, self.T)):
-                z = torch.randn(n_samples, *size).cuda() if i > 1 else 0
+                z = torch.randn(n_samples, *size).to("cpu") if i > 1 else 0
                 if i == 999:
                     print(z.mean())
-                t = torch.tensor(i).repeat(n_samples).cuda()
+                t = torch.tensor(i).repeat(n_samples).to("cpu")
                 eps = self.eps_model(x_t, t, context, dropout_mask)
                 x_t = self.sqrt_alphas_inv[i] * (x_t - eps * self.one_minus_alphas_over_sqrt_one_minus_alpha_bars[i]) + self.sigmas[i] * z
         self.train()
@@ -82,7 +82,7 @@ class DenoisingDiffusionProbabilisticModel(torch.nn.Module):
     def sample_ddim(self, n_samples, size, x_T: torch.Tensor = None, context: torch.Tensor = None, dropout_mask: torch.Tensor = None, eta = 0, ddim_step = 50) -> torch.Tensor:  
         # if initial noise is not provided then sample it
         # style test
-        x_t = x_T if x_T is not None else self.sample_prior(n_samples, size).cuda()
+        x_t = x_T if x_T is not None else self.sample_prior(n_samples, size).to("cpu")
 
         x_T_array = [x_t.cpu().detach().numpy()]
         # See formulas (12) and (16) of DDIM paper https://arxiv.org/pdf/2010.02502.pdf
@@ -100,13 +100,13 @@ class DenoisingDiffusionProbabilisticModel(torch.nn.Module):
         self.eval()
         with torch.no_grad():       
             for i in reversed(range(0, self.T, skip)):
-                t = torch.tensor(i).repeat(n_samples).cuda()     
+                t = torch.tensor(i).repeat(n_samples).to("cpu")     
                 model_output = self.eps_model(x_t, t, context, dropout_mask)          
                 # 1. get previous step value (=t-1)
                 prev_timestep = i - skip
                 # 2. compute alphas, betas
                 alpha_prod_t = self.alpha_bars[i]
-                alpha_prod_t_prev = self.alphas_prev[prev_timestep] if prev_timestep >= 0 else torch.tensor(1.0).cuda()
+                alpha_prod_t_prev = self.alphas_prev[prev_timestep] if prev_timestep >= 0 else torch.tensor(1.0).to("cpu")
                 beta_prod_t = 1 - alpha_prod_t
                 beta_prod_t_prev = 1 - alpha_prod_t_prev
                 # 3. compute predicted original sample from predicted noise also called
@@ -131,7 +131,7 @@ class DenoisingDiffusionProbabilisticModel(torch.nn.Module):
 
                 if eta > 0:
                     device = model_output.device if torch.is_tensor(model_output) else "cpu"
-                    noise = torch.randn(n_samples, *size).cuda() 
+                    noise = torch.randn(n_samples, *size).to("cpu") 
                     variance = std_dev_t * noise
                     if not torch.is_tensor(model_output):
                         variance = variance.numpy()
@@ -146,7 +146,7 @@ class DenoisingDiffusionProbabilisticModel(torch.nn.Module):
 
     def sample_ddim_reverse(self, x_start, n_samples, size, x_T: torch.Tensor = None, context: torch.Tensor = None, dropout_mask: torch.Tensor = None, eta = 0, ddim_step = 50) -> torch.Tensor:  
        
-        x_t = x_T if x_T is not None else x_start.cuda()
+        x_t = x_T if x_T is not None else x_start.to("cpu")
         skip = self.T // ddim_step
         print("skip: %d"%skip)
         self.eval()
@@ -156,13 +156,13 @@ class DenoisingDiffusionProbabilisticModel(torch.nn.Module):
         with torch.no_grad():       
             # reverse + reverse = not reverse
             for i in range(0, self.T, skip):
-                t = torch.tensor(i).repeat(n_samples).cuda()     
+                t = torch.tensor(i).repeat(n_samples).to("cpu")     
                 model_output = self.eps_model(x_t, t, context, dropout_mask)          
                 # 1. get previous step value (=t + 1)
                 next_timestep = i + skip
                 # 2. compute alphas, betas
                 alpha_prod_t = self.alpha_bars[i]
-                alpha_prod_t_next = self.alphas_next[next_timestep] if next_timestep < self.T else torch.tensor(0.0).cuda()
+                alpha_prod_t_next = self.alphas_next[next_timestep] if next_timestep < self.T else torch.tensor(0.0).to("cpu")
                 beta_prod_t = 1 - alpha_prod_t
                 # 3. compute predicted original sample from predicted noise also called
                 # "predicted x_0" of formula (12) from https://arxiv.org/pdf/2010.02502.pdf
@@ -190,7 +190,7 @@ class DenoisingDiffusionProbabilisticModel(torch.nn.Module):
         # CLASSIFIER-FREE DIFFUSION GUIDANCE: https://arxiv.org/pdf/2207.12598.pdf
 
         # if initial noise is not provided then sample it
-        x_t = x_T if x_T is not None else self.sample_prior(n_samples, size).cuda()
+        x_t = x_T if x_T is not None else self.sample_prior(n_samples, size).to("cpu")
 
         if type(guidance_scale) is float:
             guidance_scale = [guidance_scale] * self.T
@@ -203,8 +203,8 @@ class DenoisingDiffusionProbabilisticModel(torch.nn.Module):
 
             # for i in pbar:
             for i in reversed(range(0, self.T)):
-                z = torch.randn(n_samples, *size).cuda() if i > 1 else 0
-                t = torch.tensor(i).repeat(n_samples).cuda()
+                z = torch.randn(n_samples, *size).to("cpu") if i > 1 else 0
+                t = torch.tensor(i).repeat(n_samples).to("cpu")
 
                 eps_unconditional = self.eps_model(x_t, t, context=None, dropout_mask=None)
                 eps_conditional = self.eps_model(x_t, t, context, dropout_mask=None)
@@ -219,7 +219,7 @@ class DenoisingDiffusionProbabilisticModel(torch.nn.Module):
 
     def sample_and_get_step_results(self, n_samples, size, x_T: torch.Tensor = None, context: torch.Tensor = None, dropout_mask: torch.Tensor = None, result_steps = None) -> torch.Tensor:
         # if initial noise is not provided then sample it
-        x_t = x_T if x_T is not None else self.sample_prior(n_samples, size).cuda()
+        x_t = x_T if x_T is not None else self.sample_prior(n_samples, size).to("cpu")
 
         result_xs = {0: x_t.clone()}
 
@@ -232,8 +232,8 @@ class DenoisingDiffusionProbabilisticModel(torch.nn.Module):
 
             # for i in pbar:
             for i in reversed(range(0, self.T)):
-                z = torch.randn(n_samples, *size).cuda() if i > 1 else 0
-                t = torch.tensor(i).repeat(n_samples).cuda()
+                z = torch.randn(n_samples, *size).to("cpu") if i > 1 else 0
+                t = torch.tensor(i).repeat(n_samples).to("cpu")
 
                 eps = self.eps_model(x_t, t, context, dropout_mask)
                 x_t = self.sqrt_alphas_inv[i] * (x_t - eps * self.one_minus_alphas_over_sqrt_one_minus_alpha_bars[i]) + self.sigmas[i] * z

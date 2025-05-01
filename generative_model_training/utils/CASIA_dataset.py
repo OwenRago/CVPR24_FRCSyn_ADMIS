@@ -41,21 +41,35 @@ class SamplesWithEmbeddingsFileDataset(torch.utils.data.Dataset):
 
     @staticmethod
     def build_samples(embeddings_file_path: str, images_name_file_path: str, sample_root: str, sample_file_ending: str):
-        # normed templates: (n, 512)
+        print("🧠 Trying to load:")
+        print("  ➤ embeddings_file_path:", embeddings_file_path)
+        print("  ➤ images_name_file_path:", images_name_file_path)
+        print("  ➤ sample_root:", sample_root)
+
+        if not os.path.exists(embeddings_file_path):
+            raise FileNotFoundError(f"❌ embeddings_file_path not found: {embeddings_file_path}")
+        if not os.path.exists(images_name_file_path):
+            raise FileNotFoundError(f"❌ images_name_file_path not found: {images_name_file_path}")
+        if not os.path.exists(sample_root):
+            raise FileNotFoundError(f"❌ sample_root not found: {sample_root}")
+
         content = np.load(embeddings_file_path)
-        print("CASIA contexts file loaded")
-        # "label_dir/name.jpg"
-        # 从文件中读取字符串数组  
-        with open(images_name_file_path, 'rb') as f:  
+        print("✅ CASIA contexts file loaded")
+
+        with open(images_name_file_path, 'rb') as f:
             image_names = pickle.load(f)
-        print("CASIA file names file loaded")
+        print("✅ CASIA file names file loaded")
+
         samples = []
         total_images = len(image_names)
         for index in range(total_images):
             embed = content[index]
             image_path = os.path.join(sample_root, image_names[index])
+            if not os.path.exists(image_path):
+                print(f"⚠️ Warning: image not found: {image_path}")
             samples.append((image_path, embed))
         return samples
+
 
     def __getitem__(self, index: int):
         image_path, embedding_npy = self.samples[index]

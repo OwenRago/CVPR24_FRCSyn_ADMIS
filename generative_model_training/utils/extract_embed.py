@@ -27,6 +27,7 @@ class ImageInferenceDataset(torch.utils.data.Dataset):
         self.transform = transforms.Compose(
             [
                 transforms.ToTensor(),
+                transforms.Resize((112, 112)),
                 transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]),
             ]
         )

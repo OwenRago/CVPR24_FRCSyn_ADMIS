@@ -38,28 +38,29 @@ class IndexParser(object):
         self.sample_num = 0
         self.class_num = 0
 
-
 class ImgSampleParser(object):
-    """ Class for Image Sample parser
-    """
-
     def __init__(self, transform, crop_augmentation_prob=0.2) -> None:
         self.transform = transform
         self.crop_augmentation_prob = crop_augmentation_prob
+
     def __call__(self, path, label):
         image = cv2.imread(path)
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+
+        # Convert to PIL Image
+        image = Image.fromarray(image)
+
         if self.transform is not None:
-            # before augment: flip
-            image = self.transform[0](image)
-            # adaface augment: crop
-            if np.random.random() < self.crop_augmentation_prob:
-                ### method:1 ###
-                image = self.transform[1](image)
-                ### method:2 ###
-                # image = self.crop_augment(image)
-            # after augment: normalization
-            image = self.transform[2](image)
+            if isinstance(self.transform, list):
+                # List of transforms: [flip, crop, normalize]
+                image = self.transform[0](image)
+                if np.random.random() < self.crop_augmentation_prob:
+                    image = self.transform[1](image)
+                image = self.transform[2](image)
+            else:
+                # Normal torchvision Compose
+                image = self.transform(image)
+
         return image, label
 
 # AdaFace augment

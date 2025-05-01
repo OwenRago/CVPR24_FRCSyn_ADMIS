@@ -12,10 +12,12 @@ def make_inputs(data_path='/remote-home/share/yxmi/datasets/TFR-BUPT/',
     rgb_mean = [0.5, 0.5, 0.5]
     rgb_std = [0.5, 0.5, 0.5]
     transform = transforms.Compose([
-        transforms.ToPILImage(),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=rgb_mean, std=rgb_std)
+    transforms.RandomHorizontalFlip(),
+    transforms.Resize((112, 112)),
+    transforms.ToTensor(),
+    transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]),
     ])
+
 
     ds_names = ['TFR-BUPT']
     ds = MultiDataset(data_path, idx_path,

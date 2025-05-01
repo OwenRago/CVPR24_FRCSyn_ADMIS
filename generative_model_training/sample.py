@@ -113,7 +113,7 @@ class DiffusionSamplerLite(LightningLite):
             print("sample " + prefix)
             # id condition
             context = torch.from_numpy(contexts[context_ids[id_index]]).float()  
-            context = context.repeat(cfg.sampling.batch_size, 1).cuda()
+            context = context.repeat(cfg.sampling.batch_size, 1).to("cpu")
             while not isinstance(diffusion_model, DenoisingDiffusionProbabilisticModel):
                 diffusion_model = diffusion_model.module
             

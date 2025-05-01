@@ -17,11 +17,12 @@ constants:                         # some constants (can be overriden by default
   n_classes: 0
 
 training:
-  precision: 16
+  precision: 32
   batch_size: 64
   num_workers: 1
   pin_memory: true
-  steps: 900_000
+  ##steps: 900_000
+  steps: 100
   steps_between_sampling: 2000
   steps_between_eval: 50000
   steps_between_logging: 500

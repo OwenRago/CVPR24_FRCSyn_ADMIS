@@ -146,7 +146,9 @@ def accuracy_dist(cfg, outputs, labels, class_split, topk=(1,)):
     maxk = max(topk)
 
     # add each gpu part max index by base
+    maxk = min(maxk, outputs.size(1))  # Limit k to num_classes
     scores, preds = outputs.topk(maxk, 1, True, True)
+    print(f"outputs shape: {outputs.shape}, maxk: {maxk}")
     preds += base
 
     batch_size = labels.size(0)

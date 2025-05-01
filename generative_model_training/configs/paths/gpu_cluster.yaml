@@ -1,2 +1,2 @@
-root: "../../../"
-data_root: "../../../../dateset"
+root: "../../.."
+data_root: "../../../../dataset"

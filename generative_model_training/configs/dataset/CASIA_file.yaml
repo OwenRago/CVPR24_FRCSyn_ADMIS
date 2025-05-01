@@ -3,13 +3,13 @@ constants:
   n_classes: 0
   image_size: 128
 
-latent_diffusion: True
+latent_diffusion: true
 
 dataset:
-  _target_:  utils.CASIA_dataset.SamplesWithEmbeddingsFileDataset
-  samples_root: "../../../../dataset/CASIA/images" # The root path is the location where the log file is located
-  embeddings_file_path: "../../../../dataset/CASIA/elasticface_embeddings/elastic_embed.npy" # The root path is the location where the log file is located
-  images_name_file_path: "../../../../dataset/CASIA/elasticface_embeddings/image_names.pkl" # The root path is the location where the log file is located
+  _target_: utils.CASIA_dataset.SamplesWithEmbeddingsFileDataset
+  embeddings_file_path: /Users/audreymongillo/Documents/GitHub/CVPR24_FRCSyn_ADMIS/dataset/CASIA/elasticface_embeddings/elastic_embed.npy
+  images_name_file_path: /Users/audreymongillo/Documents/GitHub/CVPR24_FRCSyn_ADMIS/dataset/CASIA/elasticface_embeddings/image_names.pkl
+  samples_root: /Users/audreymongillo/Documents/GitHub/CVPR24_FRCSyn_ADMIS/dataset/CASIA/images
   sample_file_ending: ".jpg"
   sample_loader:
     _target_: utils.CASIA_dataset.PILImageLoader
@@ -17,10 +17,8 @@ dataset:
     _target_: torchvision.transforms.Compose
     transforms:
       - _target_: torchvision.transforms.Resize
-        size:
-        - 128
-        - 128
+        size: [128, 128]
       - _target_: torchvision.transforms.ToTensor
       - _target_: torchvision.transforms.RandomHorizontalFlip
         p: 0.5
-                                                   
+                                  
